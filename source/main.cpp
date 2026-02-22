@@ -113,7 +113,7 @@ int main(int argc, char* argv[])
 	chk(SDL_Vulkan_LoadLibrary(NULL));
 	volkInitialize();
 	// Instance
-	VkApplicationInfo appInfo{ .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "How to Vulkan", .apiVersion = VK_API_VERSION_1_3 };
+	VkApplicationInfo appInfo{ .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "Vulkan Playground", .apiVersion = VK_API_VERSION_1_3 };
 	uint32_t instanceExtensionsCount{ 0 };
 	char const* const* instanceExtensions{ SDL_Vulkan_GetInstanceExtensions(&instanceExtensionsCount) };
 	VkInstanceCreateInfo instanceCI{
