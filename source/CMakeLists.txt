@@ -93,6 +93,8 @@ if(WIN32)
     install(FILES 
         "${VULKAN_SDK_BIN_DIR}/SDL3.dll" 
         "${VULKAN_SDK_BIN_DIR}/slang.dll"
+        "${VULKAN_SDK_BIN_DIR}/slang-compiler.dll"
+        "${VULKAN_SDK_BIN_DIR}/gfx.dll"
         DESTINATION .
     )
 endif()
