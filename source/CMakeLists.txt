@@ -32,6 +32,27 @@ if (NOT WIN32)
     FetchContent_MakeAvailable(GLM)
 endif()
 
+#assimp
+FetchContent_Declare(
+  assimp
+  GIT_REPOSITORY https://github.com/assimp/assimp.git
+  GIT_TAG v5.3.1
+)
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_FRAMEWORK OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE) # compile assimp as static
+
+if(MSVC)
+    add_compile_options(/wd4819) # 意思是：忽略 (Watch Disable) 4819 警告
+endif()
+
+FetchContent_MakeAvailable(assimp)
+
 set(KTX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/ktx)
 set(KTX_SOURCES
     ${KTX_DIR}/lib/texture.c
@@ -68,11 +89,10 @@ if (WIN32)
 endif()
 set_target_properties(${NAME} PROPERTIES DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(${NAME} PRIVATE cxx_std_20)
-target_link_libraries(${NAME} PRIVATE ${SDL_LIBRARY} ktx ${Slang_LIBRARY})
+target_link_libraries(${NAME} PRIVATE ${SDL_LIBRARY} ktx ${Slang_LIBRARY} assimp::assimp)
 if (NOT WIN32)
     target_link_libraries(${NAME} PRIVATE glm::glm-header-only)
 endif()
-
 
 
 # --- Installation start ---

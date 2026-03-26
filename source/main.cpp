@@ -25,6 +25,9 @@
 #include <ktxvulkan.h>
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
 
 constexpr uint32_t maxFramesInFlight{ 2 };
 uint32_t imageIndex{ 0 };
@@ -107,8 +110,48 @@ static inline void chk(bool result) {
 	}
 }
 
+void processMesh(aiMesh* mesh, const aiScene* scene, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+	for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
+		Vertex v{};
+		v.pos = { mesh->mVertices[i].x, -mesh->mVertices[i].y, mesh->mVertices[i].z };
+
+		if (mesh->HasNormals()) {
+			v.normal = { mesh->mNormals[i].x, -mesh->mNormals[i].y, mesh->mNormals[i].z };
+		}
+
+		if (mesh->mTextureCoords[0]) {
+			v.uv = { mesh->mTextureCoords[0][i].x, mesh->mTextureCoords[0][i].y };
+		}
+
+		vertices.push_back(v);
+	}
+
+	for (unsigned int i = 0; i < mesh->mNumFaces; i++) {
+		aiFace face = mesh->mFaces[i];
+		for (unsigned int j = 0; j < face.mNumIndices; j++) {
+			indices.push_back(face.mIndices[j]);
+		}
+	}
+}
+
+void testAssimpLoad(const std::string& filePath) {
+	Assimp::Importer importer;
+
+	const aiScene* scene = importer.ReadFile(filePath,
+		aiProcess_Triangulate | aiProcess_FlipUVs);
+
+	if (!scene) {
+		std::cerr << "Assimp Error: " << importer.GetErrorString() << std::endl;
+	}
+	else {
+		std::cout << "Assimp Success! Meshes found: " << scene->mNumMeshes << std::endl;
+	}
+}
+
 int main(int argc, char* argv[])
 {
+	testAssimpLoad("assets/arknights_endfield_endmin_mask.glb");
+
 	chk(SDL_Init(SDL_INIT_VIDEO));
 	chk(SDL_Vulkan_LoadLibrary(NULL));
 	volkInitialize();
@@ -233,25 +276,43 @@ int main(int argc, char* argv[])
 	VkImageViewCreateInfo depthViewCI{ .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = depthImage, .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = depthFormat, .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .levelCount = 1, .layerCount = 1 } };
 	chk(vkCreateImageView(device, &depthViewCI, nullptr, &depthImageView));
 	// Mesh data
-	tinyobj::attrib_t attrib;
-	std::vector<tinyobj::shape_t> shapes;
-	std::vector<tinyobj::material_t> materials;
-	chk(tinyobj::LoadObj(&attrib, &shapes, &materials, nullptr, nullptr, "assets/suzanne.obj"));
-	const VkDeviceSize indexCount{ shapes[0].mesh.indices.size() };
-	std::vector<Vertex> vertices{};
-	std::vector<uint16_t> indices{};
-	// Load vertex and index data
-	for (auto& index : shapes[0].mesh.indices) {
-		Vertex v{
-			.pos = { attrib.vertices[index.vertex_index * 3], -attrib.vertices[index.vertex_index * 3 + 1], attrib.vertices[index.vertex_index * 3 + 2] },
-			.normal = { attrib.normals[index.normal_index * 3], -attrib.normals[index.normal_index * 3 + 1], attrib.normals[index.normal_index * 3 + 2] },
-			.uv = { attrib.texcoords[index.texcoord_index * 2], 1.0 - attrib.texcoords[index.texcoord_index * 2 + 1] }
-		};
-		vertices.push_back(v);
-		indices.push_back(indices.size());
+	//tinyobj::attrib_t attrib;
+	//std::vector<tinyobj::shape_t> shapes;
+	//std::vector<tinyobj::material_t> materials;
+	//chk(tinyobj::LoadObj(&attrib, &shapes, &materials, nullptr, nullptr, "assets/suzanne.obj"));
+	//const VkDeviceSize indexCount{ shapes[0].mesh.indices.size() };
+	//std::vector<Vertex> vertices{};
+	//std::vector<uint16_t> indices{};
+	//// Load vertex and index data
+	//for (auto& index : shapes[0].mesh.indices) {
+	//	Vertex v{
+	//		.pos = { attrib.vertices[index.vertex_index * 3], -attrib.vertices[index.vertex_index * 3 + 1], attrib.vertices[index.vertex_index * 3 + 2] },
+	//		.normal = { attrib.normals[index.normal_index * 3], -attrib.normals[index.normal_index * 3 + 1], attrib.normals[index.normal_index * 3 + 2] },
+	//		.uv = { attrib.texcoords[index.texcoord_index * 2], 1.0 - attrib.texcoords[index.texcoord_index * 2 + 1] }
+	//	};
+	//	vertices.push_back(v);
+	//	indices.push_back(indices.size());
+	//}
+	//VkDeviceSize vBufSize{ sizeof(Vertex) * vertices.size() };
+	//VkDeviceSize iBufSize{ sizeof(uint16_t) * indices.size() };
+	Assimp::Importer importer;
+	const aiScene* scene = importer.ReadFile("assets/suzanne.obj",
+		aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals);
+
+	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
+		std::cerr << "Assimp Error: " << importer.GetErrorString() << std::endl;
 	}
+
+	std::vector<Vertex> vertices{};
+	std::vector<uint32_t> indices{};
+
+	for (unsigned int i = 0; i < scene->mNumMeshes; i++) {
+		processMesh(scene->mMeshes[i], scene, vertices, indices);
+	}
+
 	VkDeviceSize vBufSize{ sizeof(Vertex) * vertices.size() };
-	VkDeviceSize iBufSize{ sizeof(uint16_t) * indices.size() };
+	VkDeviceSize iBufSize{ sizeof(uint32_t) * indices.size() };
+	const uint32_t indexCount = static_cast<uint32_t>(indices.size());
 	VkBufferCreateInfo bufferCI{ .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = vBufSize + iBufSize, .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT };
 	VmaAllocationCreateInfo bufferAllocCI{ .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = VMA_MEMORY_USAGE_AUTO };
 	chk(vmaCreateBuffer(allocator, &bufferCI, &bufferAllocCI, &vBuffer, &vBufferAllocation, nullptr));
