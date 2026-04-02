@@ -296,7 +296,10 @@ int main(int argc, char* argv[])
 	//VkDeviceSize vBufSize{ sizeof(Vertex) * vertices.size() };
 	//VkDeviceSize iBufSize{ sizeof(uint16_t) * indices.size() };
 	Assimp::Importer importer;
-	const aiScene* scene = importer.ReadFile("assets/suzanne.obj",
+	std::string fileName =
+		/*"assets/suzanne.obj";*/
+		"assets/arknights_endfield_endmin_mask.glb";
+	const aiScene* scene = importer.ReadFile(fileName,
 		aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals);
 
 	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
@@ -599,7 +602,7 @@ int main(int argc, char* argv[])
 		vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSetTex, 0, nullptr);
 		VkDeviceSize vOffset{ 0 };
 		vkCmdBindVertexBuffers(cb, 0, 1, &vBuffer, &vOffset);
-		vkCmdBindIndexBuffer(cb, vBuffer, vBufSize, VK_INDEX_TYPE_UINT16);
+		vkCmdBindIndexBuffer(cb, vBuffer, vBufSize, VK_INDEX_TYPE_UINT32);
 		vkCmdPushConstants(cb, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VkDeviceAddress), &shaderDataBuffers[frameIndex].deviceAddress);
 		vkCmdDrawIndexed(cb, indexCount, 3, 0, 0, 0);
 		vkCmdEndRendering(cb);
