@@ -667,6 +667,12 @@ int main(int argc, char* argv[])
 				if (event.key.key == SDLK_MINUS || event.key.key == SDLK_KP_MINUS) {
 					shaderData.selected = (shaderData.selected > 0) ? shaderData.selected - 1 : 2;
 				}
+				if (event.key.key == SDLK_SPACE) {
+					camPos.y += elapsedTime * 1.0f;
+				}
+				if (event.key.key == SDLK_LSHIFT) {
+					camPos.y -= elapsedTime * 1.0f;
+				}
 			}
 			// Window resize
 			if (event.type == SDL_EVENT_WINDOW_RESIZED) {
