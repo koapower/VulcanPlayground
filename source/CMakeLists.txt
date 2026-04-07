@@ -19,6 +19,7 @@ include_directories($ENV{VULKAN_SDK}/include)
 include_directories(external/tinyobj)
 include_directories(external/ktx/include)
 include_directories(external/ktx/other_include)
+include_directories(external/stb_image)
 
 find_package (Vulkan REQUIRED)
 
@@ -82,7 +83,7 @@ if(MSVC)
 endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
 
-add_executable(${NAME} main.cpp assets/shader.slang)
+add_executable(${NAME} main.cpp assets/shader.slang TextureLoader.cpp TextureLoader.h)
 target_compile_definitions(${NAME} PRIVATE VK_NO_PROTOTYPES)
 if (WIN32)
     target_compile_definitions(${NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
