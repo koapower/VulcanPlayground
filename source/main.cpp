@@ -74,12 +74,12 @@ struct Texture {
 	VkImageView view{ VK_NULL_HANDLE };
 	VkSampler sampler{ VK_NULL_HANDLE };
 };
-std::array<Texture, 3> textures{};
+std::vector<Texture> textures{};
 VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
 VkDescriptorSetLayout descriptorSetLayoutTex{ VK_NULL_HANDLE };
 VkDescriptorSet descriptorSetTex{ VK_NULL_HANDLE };
 Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
-glm::vec3 camPos{ 0.0f, 0.0f, -6.0f };
+glm::vec3 camPos{ 0.0f, 0.0f, -100.0f };
 glm::vec3 objectRotations[3]{};
 glm::ivec2 windowSize{};
 struct Vertex {
@@ -135,7 +135,7 @@ void processMesh(aiMesh* mesh, const aiScene* scene, std::vector<Vertex>& vertic
 	}
 }
 
-void testAssimpLoad(const std::string& filePath) {
+void showFileInfo(const std::string& filePath) {
 	Assimp::Importer importer;
 
 	const aiScene* scene = importer.ReadFile(filePath,
@@ -145,14 +145,12 @@ void testAssimpLoad(const std::string& filePath) {
 		std::cerr << "Assimp Error: " << importer.GetErrorString() << std::endl;
 	}
 	else {
-		std::cout << "Assimp Success! Meshes found: " << scene->mNumMeshes << std::endl;
+		std::cout << "Assimp Success! Meshes found: " << scene->mNumMeshes << " Textures found: "<< scene->mNumTextures << std::endl;
 	}
 }
 
 int main(int argc, char* argv[])
 {
-	testAssimpLoad("assets/arknights_endfield_endmin_mask.glb");
-
 	chk(SDL_Init(SDL_INIT_VIDEO));
 	chk(SDL_Vulkan_LoadLibrary(NULL));
 	volkInitialize();
@@ -299,14 +297,14 @@ int main(int argc, char* argv[])
 	Assimp::Importer importer;
 	std::string fileName =
 		//"assets/suzanne.obj";
-		"assets/arknights_endfield_endmin_mask.glb";
+		//"assets/arknights_endfield_endmin_mask.glb";
+		"assets/arknights_endfield_-yvonne-.glb";
 	const aiScene* scene = importer.ReadFile(fileName,
 		aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals);
-
 	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
 		std::cerr << "Assimp Error: " << importer.GetErrorString() << std::endl;
 	}
-
+	showFileInfo(fileName);
 	std::vector<Vertex> vertices{};
 	std::vector<uint32_t> indices{};
 
@@ -448,6 +446,7 @@ int main(int argc, char* argv[])
 	//	textureDescriptors.push_back({ .sampler = textures[i].sampler, .imageView = textures[i].view, .imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL });
 	//}
 	//textureloader load texture
+	textures.resize(scene->mNumMaterials);
 	for (unsigned int i = 0; i < scene->mNumMaterials; i++) {
 		aiMaterial* material = scene->mMaterials[i];
 		aiString texturePath;
@@ -843,20 +842,23 @@ int main(int argc, char* argv[])
 				}
 			}
 			if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-				camPos.z += (float)event.wheel.y * elapsedTime * 10.0f;
+				camPos.z += (float)event.wheel.y * elapsedTime * 20.0f;
 			}
 			if (event.type == SDL_EVENT_KEY_DOWN) {
-				if (event.key.key == SDLK_PLUS || event.key.key == SDLK_KP_PLUS) {
-					shaderData.selected = (shaderData.selected < 2) ? shaderData.selected + 1 : 0;
+				if (event.key.key == SDLK_1) {
+					shaderData.selected = 0;
 				}
-				if (event.key.key == SDLK_MINUS || event.key.key == SDLK_KP_MINUS) {
-					shaderData.selected = (shaderData.selected > 0) ? shaderData.selected - 1 : 2;
+				if (event.key.key == SDLK_2) {
+					shaderData.selected = 1;
+				}
+				if (event.key.key == SDLK_3) {
+					shaderData.selected = 2;
 				}
 				if (event.key.key == SDLK_SPACE) {
-					camPos.y += elapsedTime * 1.0f;
+					camPos.y += elapsedTime * 5.0f;
 				}
 				if (event.key.key == SDLK_LSHIFT) {
-					camPos.y -= elapsedTime * 1.0f;
+					camPos.y -= elapsedTime * 5.0f;
 				}
 			}
 			// Window resize
