@@ -29,6 +29,7 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 #include "TextureLoader.h"
+#include "Camera.h"
 
 constexpr uint32_t maxFramesInFlight{ 2 };
 uint32_t imageIndex{ 0 };
@@ -79,7 +80,7 @@ VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
 VkDescriptorSetLayout descriptorSetLayoutTex{ VK_NULL_HANDLE };
 VkDescriptorSet descriptorSetTex{ VK_NULL_HANDLE };
 Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
-glm::vec3 camPos{ 0.0f, 0.0f, -100.0f };
+Camera camera{};
 glm::vec3 objectRotations[3]{};
 glm::ivec2 windowSize{};
 struct Vertex {
@@ -87,6 +88,14 @@ struct Vertex {
 	glm::vec3 normal;
 	glm::vec2 uv;
 };
+struct GizmoVertex {
+	glm::vec3 pos;
+	glm::vec3 color;
+};
+VkPipeline gizmoPipeline{ VK_NULL_HANDLE };
+VkPipelineLayout gizmoPipelineLayout{ VK_NULL_HANDLE };
+VkBuffer gizmoVBuffer{ VK_NULL_HANDLE };
+VmaAllocation gizmoVAllocation{ VK_NULL_HANDLE };
 
 static inline void chk(VkResult result) {
 	if (result != VK_SUCCESS) {
@@ -490,7 +499,7 @@ int main(int argc, char* argv[])
 		}
 
 		if (img.pixels) {
-			// 1. �إ� Image (Vulkan �ݪ�����)
+			// 1. Create Image (GPU-side storage)
 			VkImageCreateInfo texImgCI{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 				.imageType = VK_IMAGE_TYPE_2D,
@@ -505,10 +514,9 @@ int main(int argc, char* argv[])
 			};
 
 			VmaAllocationCreateInfo texImageAllocCI{ .usage = VMA_MEMORY_USAGE_AUTO };
-			// �o�� textures[i] �O�쥻�ΨӦs VkImage �����c
 			chk(vmaCreateImage(allocator, &texImgCI, &texImageAllocCI, &textures[i].image, &textures[i].allocation, nullptr));
 
-			// 2. �إ� ImageView
+			// 2. Create ImageView
 			VkImageViewCreateInfo texVewCI{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 				.image = textures[i].image,
@@ -518,7 +526,7 @@ int main(int argc, char* argv[])
 			};
 			chk(vkCreateImageView(device, &texVewCI, nullptr, &textures[i].view));
 
-			// 3. �إ� Staging Buffer (CPU �� GPU ������)
+			// 3. Create Staging Buffer (CPU-to-GPU upload bridge)
 			VkBuffer imgSrcBuffer{};
 			VmaAllocation imgSrcAllocation{};
 			VkBufferCreateInfo imgSrcBufferCI{
@@ -532,13 +540,13 @@ int main(int argc, char* argv[])
 			};
 			chk(vmaCreateBuffer(allocator, &imgSrcBufferCI, &imgSrcAllocCI, &imgSrcBuffer, &imgSrcAllocation, nullptr));
 
-			// �����ƾڨ� Staging Buffer
+			// Copy pixel data into Staging Buffer
 			void* imgSrcBufferPtr{ nullptr };
 			chk(vmaMapMemory(allocator, imgSrcAllocation, &imgSrcBufferPtr));
 			memcpy(imgSrcBufferPtr, img.pixels, img.size);
 			vmaUnmapMemory(allocator, imgSrcAllocation);
 
-			// 4. �ǳƤ@���ʴ��檺 Command Buffer (�h�B�u)
+			// 4. Allocate a one-time Command Buffer for the upload
 			VkCommandBuffer cbOneTime{};
 			VkCommandBufferAllocateInfo cbOneTimeAI{
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -554,7 +562,7 @@ int main(int argc, char* argv[])
 			};
 			chk(vkBeginCommandBuffer(cbOneTime, &cbOneTimeBI));
 
-			// �ഫ Layout: Undefined -> Transfer Destination
+			// Transition layout: Undefined -> Transfer Destination
 			VkImageMemoryBarrier2 barrierTexImage{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 				.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
@@ -569,7 +577,7 @@ int main(int argc, char* argv[])
 			VkDependencyInfo barrierTexInfo{ .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrierTexImage };
 			vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
 
-			// �ƻs Staging Buffer ���e�� Image
+			// Copy Staging Buffer contents into the Image
 			VkBufferImageCopy region{
 				.bufferOffset = 0,
 				.bufferRowLength = 0,
@@ -580,7 +588,7 @@ int main(int argc, char* argv[])
 			};
 			vkCmdCopyBufferToImage(cbOneTime, imgSrcBuffer, textures[i].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-			// �ഫ Layout: Transfer Destination -> Shader Read Only
+			// Transition layout: Transfer Destination -> Shader Read Only
 			VkImageMemoryBarrier2 barrierTexRead{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 				.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -597,7 +605,7 @@ int main(int argc, char* argv[])
 
 			chk(vkEndCommandBuffer(cbOneTime));
 
-			// 5. ����õ��� Fence (�T�O GPU �h���a�F)
+			// 5. Create a Fence to wait for GPU completion
 			VkFenceCreateInfo fenceOneTimeCI{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 			VkFence fenceOneTime{};
 			chk(vkCreateFence(device, &fenceOneTimeCI, nullptr, &fenceOneTime));
@@ -605,18 +613,18 @@ int main(int argc, char* argv[])
 			VkSubmitInfo oneTimeSI{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cbOneTime };
 			chk(vkQueueSubmit(queue, 1, &oneTimeSI, fenceOneTime));
 
-			// ���� GPU ���槹��
+			// Wait for GPU to finish
 			chk(vkWaitForFences(device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
 
-			// 6. �M�z�Ȯɩʸ귽
+			// 6. Clean up temporary upload resources
 			vkDestroyFence(device, fenceOneTime, nullptr);
 			vkFreeCommandBuffers(device, commandPool, 1, &cbOneTime);
 			vmaDestroyBuffer(allocator, imgSrcBuffer, imgSrcAllocation);
 
-			// ���� STB Ū���X�Ӫ��������
+			// Free the CPU-side pixel data loaded by STB
 			img.free();
 
-			// 7. �إ� Sampler (���˾�)
+			// 7. Create Sampler
 			VkSamplerCreateInfo samplerCI{
 				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 				.magFilter = VK_FILTER_LINEAR,
@@ -637,7 +645,7 @@ int main(int argc, char* argv[])
 			};
 			chk(vkCreateSampler(device, &samplerCI, nullptr, &textures[i].sampler));
 
-			// �N��T�[�J Descriptors
+			// Register texture info into descriptor list
 			textureDescriptors.push_back({
 				.sampler = textures[i].sampler,
 				.imageView = textures[i].view,
@@ -721,17 +729,80 @@ int main(int argc, char* argv[])
 		.layout = pipelineLayout
 	};
 	chk(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &pipeline));
+	// Gizmo pipeline
+	{
+		Slang::ComPtr<slang::IModule> gizmoModule{ slangSession->loadModuleFromSource("gizmo", "assets/gizmo.slang", nullptr, nullptr) };
+		Slang::ComPtr<ISlangBlob> gizmoSpirv;
+		gizmoModule->getTargetCode(0, gizmoSpirv.writeRef());
+		VkShaderModuleCreateInfo gizmoShaderCI{ .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = gizmoSpirv->getBufferSize(), .pCode = (uint32_t*)gizmoSpirv->getBufferPointer() };
+		VkShaderModule gizmoShaderModule{};
+		chk(vkCreateShaderModule(device, &gizmoShaderCI, nullptr, &gizmoShaderModule));
+
+		VkPushConstantRange gizmoPCRange{ .stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(glm::mat4) };
+		VkPipelineLayoutCreateInfo gizmoLayoutCI{ .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .pushConstantRangeCount = 1, .pPushConstantRanges = &gizmoPCRange };
+		chk(vkCreatePipelineLayout(device, &gizmoLayoutCI, nullptr, &gizmoPipelineLayout));
+
+		std::vector<VkPipelineShaderStageCreateInfo> gizmoStages{
+			{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,   .module = gizmoShaderModule, .pName = "main"},
+			{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = gizmoShaderModule, .pName = "main"},
+		};
+		VkVertexInputBindingDescription gizmoVBinding{ .binding = 0, .stride = sizeof(GizmoVertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX };
+		std::vector<VkVertexInputAttributeDescription> gizmoAttribs{
+			{.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(GizmoVertex, pos)},
+			{.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(GizmoVertex, color)},
+		};
+		VkPipelineVertexInputStateCreateInfo gizmoVInput{
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+			.vertexBindingDescriptionCount = 1, .pVertexBindingDescriptions = &gizmoVBinding,
+			.vertexAttributeDescriptionCount = 2, .pVertexAttributeDescriptions = gizmoAttribs.data(),
+		};
+		VkPipelineInputAssemblyStateCreateInfo gizmoAssembly{ .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST };
+		VkPipelineDepthStencilStateCreateInfo gizmoDepth{ .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, .depthTestEnable = VK_FALSE, .depthWriteEnable = VK_FALSE };
+		VkGraphicsPipelineCreateInfo gizmoPipelineCI{
+			.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+			.pNext = &renderingCI,
+			.stageCount = 2, .pStages = gizmoStages.data(),
+			.pVertexInputState = &gizmoVInput,
+			.pInputAssemblyState = &gizmoAssembly,
+			.pViewportState = &viewportState,
+			.pRasterizationState = &rasterizationState,
+			.pMultisampleState = &multisampleState,
+			.pDepthStencilState = &gizmoDepth,
+			.pColorBlendState = &colorBlendState,
+			.pDynamicState = &dynamicState,
+			.layout = gizmoPipelineLayout,
+		};
+		chk(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gizmoPipelineCI, nullptr, &gizmoPipeline));
+		vkDestroyShaderModule(device, gizmoShaderModule, nullptr);
+	}
+	// Gizmo vertex buffer  (6 verts: 3 axes × 2 endpoints)
+	{
+		static const GizmoVertex gizmoVerts[] = {
+			{{0,0,0}, {1,0.2f,0.2f}}, {{1,0,0}, {1,0.2f,0.2f}},  // X red
+			{{0,0,0}, {0.2f,1,0.2f}}, {{0,1,0}, {0.2f,1,0.2f}},  // Y green
+			{{0,0,0}, {0.2f,0.4f,1}}, {{0,0,1}, {0.2f,0.4f,1}},  // Z blue
+		};
+		VkBufferCreateInfo bufCI{ .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = sizeof(gizmoVerts), .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT };
+		VmaAllocationCreateInfo allocCI{ .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, .usage = VMA_MEMORY_USAGE_AUTO };
+		chk(vmaCreateBuffer(allocator, &bufCI, &allocCI, &gizmoVBuffer, &gizmoVAllocation, nullptr));
+		void* mapped;
+		vmaMapMemory(allocator, gizmoVAllocation, &mapped);
+		memcpy(mapped, gizmoVerts, sizeof(gizmoVerts));
+		vmaUnmapMemory(allocator, gizmoVAllocation);
+	}
 	// Render loop
 	uint64_t lastTime{ SDL_GetTicks() };
 	bool quit{ false };
 	while (!quit) {
+		float elapsedTime{ (SDL_GetTicks() - lastTime) / 1000.0f };
+		lastTime = SDL_GetTicks();
 		// Sync
 		chk(vkWaitForFences(device, 1, &fences[frameIndex], true, UINT64_MAX));
 		chk(vkResetFences(device, 1, &fences[frameIndex]));
 		chkSwapchain(vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, presentSemaphores[frameIndex], VK_NULL_HANDLE, &imageIndex));
 		// Update shader data
-		shaderData.projection = glm::perspective(glm::radians(45.0f), (float)windowSize.x / (float)windowSize.y, 0.1f, 32.0f);
-		shaderData.view = glm::translate(glm::mat4(1.0f), camPos);
+		shaderData.projection = glm::perspective(glm::radians(45.0f), (float)windowSize.x / (float)windowSize.y, 0.1f, 10000.0f);
+		shaderData.view = camera.getViewMatrix();
 		for (auto i = 0; i < 3; i++) {
 			auto instancePos = glm::vec3((float)(i - 1) * 3.0f, 0.0f, 0.0f);
 			shaderData.model[i] = glm::translate(glm::mat4(1.0f), instancePos) * glm::mat4_cast(glm::quat(objectRotations[i]));
@@ -808,6 +879,26 @@ int main(int argc, char* argv[])
 			vkCmdPushConstants(cb, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(VkDeviceAddress), sizeof(uint32_t), &texIdx);
 			vkCmdDrawIndexed(cb, mesh.indexCount, 1, mesh.firstIndex, 0, 0);
 		}
+		// XYZ gizmo — top-right corner, rotation-only view
+		{
+			constexpr int32_t kGizmoSize = 90;
+			constexpr int32_t kGizmoPad  = 10;
+			int32_t gx = windowSize.x - kGizmoSize - kGizmoPad;
+			int32_t gy = kGizmoPad;
+			VkViewport gizmoVP{ .x = (float)gx, .y = (float)gy, .width = (float)kGizmoSize, .height = (float)kGizmoSize, .minDepth = 0.f, .maxDepth = 1.f };
+			VkRect2D gizmoScissor{ .offset{gx, gy}, .extent{(uint32_t)kGizmoSize, (uint32_t)kGizmoSize} };
+			vkCmdSetViewport(cb, 0, 1, &gizmoVP);
+			vkCmdSetScissor(cb, 0, 1, &gizmoScissor);
+			vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gizmoPipeline);
+			VkDeviceSize gizmoOffset = 0;
+			vkCmdBindVertexBuffers(cb, 0, 1, &gizmoVBuffer, &gizmoOffset);
+			// Rotation-only view (strip translation) + ortho projection
+			glm::mat4 rotView = glm::mat4(glm::mat3(camera.getViewMatrix()));
+			glm::mat4 ortho   = glm::ortho(-1.5f, 1.5f, 1.5f, -1.5f, -10.f, 10.f); // bottom/top swapped for Vulkan Y-down NDC
+			glm::mat4 gizmoMVP = ortho * rotView;
+			vkCmdPushConstants(cb, gizmoPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &gizmoMVP);
+			vkCmdDraw(cb, 6, 1, 0, 0);
+		}
 		vkCmdEndRendering(cb);
 		VkImageMemoryBarrier2 barrierPresent{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -847,44 +938,25 @@ int main(int argc, char* argv[])
 		};
 		chkSwapchain(vkQueuePresentKHR(queue, &presentInfo));
 		// Event polling
-		float elapsedTime{ (SDL_GetTicks() - lastTime) / 1000.0f };
 		lastTime = SDL_GetTicks();
 		for (SDL_Event event; SDL_PollEvent(&event);) {
 			if (event.type == SDL_EVENT_QUIT) {
 				quit = true;
 				break;
 			}
-			if (event.type == SDL_EVENT_MOUSE_MOTION) {
-				if (event.motion.state & SDL_BUTTON_LMASK) {
-					objectRotations[0].x -= (float)event.motion.yrel * elapsedTime;
-					objectRotations[0].y += (float)event.motion.xrel * elapsedTime;
-				}
-			}
-			if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-				camPos.z += (float)event.wheel.y * elapsedTime * 20.0f;
-			}
+			camera.processEvent(event);
 			if (event.type == SDL_EVENT_KEY_DOWN) {
-				if (event.key.key == SDLK_1) {
-					shaderData.selected = 0;
-				}
-				if (event.key.key == SDLK_2) {
-					shaderData.selected = 1;
-				}
-				if (event.key.key == SDLK_3) {
-					shaderData.selected = 2;
-				}
-				if (event.key.key == SDLK_SPACE) {
-					camPos.y += elapsedTime * 5.0f;
-				}
-				if (event.key.key == SDLK_LSHIFT) {
-					camPos.y -= elapsedTime * 5.0f;
-				}
+				if (event.key.key == SDLK_1) shaderData.selected = 0;
+				if (event.key.key == SDLK_2) shaderData.selected = 1;
+				if (event.key.key == SDLK_3) shaderData.selected = 2;
 			}
 			// Window resize
 			if (event.type == SDL_EVENT_WINDOW_RESIZED) {
 				updateSwapchain = true;
 			}
 		}
+		// Update camera after events are processed so keyboard/mouse state is fresh
+		camera.update(elapsedTime);
 		if (updateSwapchain) {
 			chk(SDL_GetWindowSize(window, &windowSize.x, &windowSize.y));
 			updateSwapchain = false;
@@ -940,6 +1012,9 @@ int main(int argc, char* argv[])
 	vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 	vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 	vkDestroyPipeline(device, pipeline, nullptr);
+	vmaDestroyBuffer(allocator, gizmoVBuffer, gizmoVAllocation);
+	vkDestroyPipelineLayout(device, gizmoPipelineLayout, nullptr);
+	vkDestroyPipeline(device, gizmoPipeline, nullptr);
 	vkDestroySwapchainKHR(device, swapchain, nullptr);
 	vkDestroySurfaceKHR(instance, surface, nullptr);
 	vkDestroyCommandPool(device, commandPool, nullptr);

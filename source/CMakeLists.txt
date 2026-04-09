@@ -83,7 +83,9 @@ if(MSVC)
 endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
 
-add_executable(${NAME} main.cpp assets/shader.slang TextureLoader.cpp TextureLoader.h)
+# Auto-collect all .cpp/.h in source root — re-run "cmake -B build" when adding new files
+file(GLOB PROJECT_SOURCES "*.cpp" "*.h")
+add_executable(${NAME} ${PROJECT_SOURCES} assets/shader.slang)
 target_compile_definitions(${NAME} PRIVATE VK_NO_PROTOTYPES)
 if (WIN32)
     target_compile_definitions(${NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
