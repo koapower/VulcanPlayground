@@ -111,7 +111,15 @@ static inline void chk(bool result) {
 	}
 }
 
+struct MeshDrawInfo {
+	uint32_t firstIndex;
+	uint32_t indexCount;
+	int32_t  materialIndex;
+};
+
 void processMesh(aiMesh* mesh, const aiScene* scene, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+	uint32_t vertexOffset = static_cast<uint32_t>(vertices.size());
+
 	for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
 		Vertex v{};
 		v.pos = { mesh->mVertices[i].x, -mesh->mVertices[i].y, mesh->mVertices[i].z };
@@ -130,7 +138,7 @@ void processMesh(aiMesh* mesh, const aiScene* scene, std::vector<Vertex>& vertic
 	for (unsigned int i = 0; i < mesh->mNumFaces; i++) {
 		aiFace face = mesh->mFaces[i];
 		for (unsigned int j = 0; j < face.mNumIndices; j++) {
-			indices.push_back(face.mIndices[j]);
+			indices.push_back(face.mIndices[j] + vertexOffset);
 		}
 	}
 }
@@ -307,9 +315,16 @@ int main(int argc, char* argv[])
 	showFileInfo(fileName);
 	std::vector<Vertex> vertices{};
 	std::vector<uint32_t> indices{};
+	std::vector<MeshDrawInfo> meshDrawInfos{};
 
 	for (unsigned int i = 0; i < scene->mNumMeshes; i++) {
+		uint32_t firstIndex = static_cast<uint32_t>(indices.size());
 		processMesh(scene->mMeshes[i], scene, vertices, indices);
+		meshDrawInfos.push_back({
+			firstIndex,
+			static_cast<uint32_t>(indices.size()) - firstIndex,
+			static_cast<int32_t>(scene->mMeshes[i]->mMaterialIndex)
+		});
 	}
 
 	VkDeviceSize vBufSize{ sizeof(Vertex) * vertices.size() };
@@ -475,7 +490,7 @@ int main(int argc, char* argv[])
 		}
 
 		if (img.pixels) {
-			// 1. «Ø¥ß Image (Vulkan ºÝªº¹êÅé)
+			// 1. ï¿½Ø¥ï¿½ Image (Vulkan ï¿½Ýªï¿½ï¿½ï¿½ï¿½ï¿½)
 			VkImageCreateInfo texImgCI{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 				.imageType = VK_IMAGE_TYPE_2D,
@@ -490,10 +505,10 @@ int main(int argc, char* argv[])
 			};
 
 			VmaAllocationCreateInfo texImageAllocCI{ .usage = VMA_MEMORY_USAGE_AUTO };
-			// ³o¸Ì textures[i] ¬O­ì¥»¥Î¨Ó¦s VkImage ªºµ²ºc
+			// ï¿½oï¿½ï¿½ textures[i] ï¿½Oï¿½ì¥»ï¿½Î¨Ó¦s VkImage ï¿½ï¿½ï¿½ï¿½ï¿½c
 			chk(vmaCreateImage(allocator, &texImgCI, &texImageAllocCI, &textures[i].image, &textures[i].allocation, nullptr));
 
-			// 2. «Ø¥ß ImageView
+			// 2. ï¿½Ø¥ï¿½ ImageView
 			VkImageViewCreateInfo texVewCI{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 				.image = textures[i].image,
@@ -503,7 +518,7 @@ int main(int argc, char* argv[])
 			};
 			chk(vkCreateImageView(device, &texVewCI, nullptr, &textures[i].view));
 
-			// 3. «Ø¥ß Staging Buffer (CPU ¨ì GPU ªº¾ô¼Ù)
+			// 3. ï¿½Ø¥ï¿½ Staging Buffer (CPU ï¿½ï¿½ GPU ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
 			VkBuffer imgSrcBuffer{};
 			VmaAllocation imgSrcAllocation{};
 			VkBufferCreateInfo imgSrcBufferCI{
@@ -517,13 +532,13 @@ int main(int argc, char* argv[])
 			};
 			chk(vmaCreateBuffer(allocator, &imgSrcBufferCI, &imgSrcAllocCI, &imgSrcBuffer, &imgSrcAllocation, nullptr));
 
-			// «þ¨©¼Æ¾Ú¨ì Staging Buffer
+			// ï¿½ï¿½ï¿½ï¿½ï¿½Æ¾Ú¨ï¿½ Staging Buffer
 			void* imgSrcBufferPtr{ nullptr };
 			chk(vmaMapMemory(allocator, imgSrcAllocation, &imgSrcBufferPtr));
 			memcpy(imgSrcBufferPtr, img.pixels, img.size);
 			vmaUnmapMemory(allocator, imgSrcAllocation);
 
-			// 4. ·Ç³Æ¤@¦¸©Ê´£¥æªº Command Buffer (·h¹B¤u)
+			// 4. ï¿½Ç³Æ¤@ï¿½ï¿½ï¿½Ê´ï¿½ï¿½æªº Command Buffer (ï¿½hï¿½Bï¿½u)
 			VkCommandBuffer cbOneTime{};
 			VkCommandBufferAllocateInfo cbOneTimeAI{
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -539,7 +554,7 @@ int main(int argc, char* argv[])
 			};
 			chk(vkBeginCommandBuffer(cbOneTime, &cbOneTimeBI));
 
-			// Âà´« Layout: Undefined -> Transfer Destination
+			// ï¿½à´« Layout: Undefined -> Transfer Destination
 			VkImageMemoryBarrier2 barrierTexImage{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 				.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
@@ -554,7 +569,7 @@ int main(int argc, char* argv[])
 			VkDependencyInfo barrierTexInfo{ .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrierTexImage };
 			vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
 
-			// ½Æ»s Staging Buffer ¤º®e¨ì Image
+			// ï¿½Æ»s Staging Buffer ï¿½ï¿½ï¿½eï¿½ï¿½ Image
 			VkBufferImageCopy region{
 				.bufferOffset = 0,
 				.bufferRowLength = 0,
@@ -565,7 +580,7 @@ int main(int argc, char* argv[])
 			};
 			vkCmdCopyBufferToImage(cbOneTime, imgSrcBuffer, textures[i].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-			// Âà´« Layout: Transfer Destination -> Shader Read Only
+			// ï¿½à´« Layout: Transfer Destination -> Shader Read Only
 			VkImageMemoryBarrier2 barrierTexRead{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 				.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -582,7 +597,7 @@ int main(int argc, char* argv[])
 
 			chk(vkEndCommandBuffer(cbOneTime));
 
-			// 5. ´£¥æ¨Ãµ¥«Ý Fence (½T«O GPU ·h§¹®a¤F)
+			// 5. ï¿½ï¿½ï¿½ï¿½Ãµï¿½ï¿½ï¿½ Fence (ï¿½Tï¿½O GPU ï¿½hï¿½ï¿½ï¿½aï¿½F)
 			VkFenceCreateInfo fenceOneTimeCI{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 			VkFence fenceOneTime{};
 			chk(vkCreateFence(device, &fenceOneTimeCI, nullptr, &fenceOneTime));
@@ -590,18 +605,18 @@ int main(int argc, char* argv[])
 			VkSubmitInfo oneTimeSI{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cbOneTime };
 			chk(vkQueueSubmit(queue, 1, &oneTimeSI, fenceOneTime));
 
-			// µ¥«Ý GPU °õ¦æ§¹²¦
+			// ï¿½ï¿½ï¿½ï¿½ GPU ï¿½ï¿½ï¿½æ§¹ï¿½ï¿½
 			chk(vkWaitForFences(device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
 
-			// 6. ²M²z¼È®É©Ê¸ê·½
+			// 6. ï¿½Mï¿½zï¿½È®É©Ê¸ê·½
 			vkDestroyFence(device, fenceOneTime, nullptr);
 			vkFreeCommandBuffers(device, commandPool, 1, &cbOneTime);
 			vmaDestroyBuffer(allocator, imgSrcBuffer, imgSrcAllocation);
 
-			// ÄÀ©ñ STB Åª¨ú¥X¨Óªº¹³¯À¸ê®Æ
+			// ï¿½ï¿½ï¿½ï¿½ STB Åªï¿½ï¿½ï¿½Xï¿½Óªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 			img.free();
 
-			// 7. «Ø¥ß Sampler (¨ú¼Ë¾¹)
+			// 7. ï¿½Ø¥ï¿½ Sampler (ï¿½ï¿½ï¿½Ë¾ï¿½)
 			VkSamplerCreateInfo samplerCI{
 				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 				.magFilter = VK_FILTER_LINEAR,
@@ -622,7 +637,7 @@ int main(int argc, char* argv[])
 			};
 			chk(vkCreateSampler(device, &samplerCI, nullptr, &textures[i].sampler));
 
-			// ±N¸ê°T¥[¤J Descriptors
+			// ï¿½Nï¿½ï¿½Tï¿½[ï¿½J Descriptors
 			textureDescriptors.push_back({
 				.sampler = textures[i].sampler,
 				.imageView = textures[i].view,
@@ -660,7 +675,7 @@ int main(int argc, char* argv[])
 	VkShaderModule shaderModule{};
 	chk(vkCreateShaderModule(device, &shaderModuleCI, nullptr, &shaderModule));
 	// Pipeline
-	VkPushConstantRange pushConstantRange{ .stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(VkDeviceAddress) };
+	VkPushConstantRange pushConstantRange{ .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, .size = sizeof(VkDeviceAddress) + sizeof(uint32_t) };
 	VkPipelineLayoutCreateInfo pipelineLayoutCI{ .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1, .pSetLayouts = &descriptorSetLayoutTex, .pushConstantRangeCount = 1, .pPushConstantRanges = &pushConstantRange };
 	chk(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
 	std::vector<VkPipelineShaderStageCreateInfo> shaderStages{
@@ -787,8 +802,12 @@ int main(int argc, char* argv[])
 		VkDeviceSize vOffset{ 0 };
 		vkCmdBindVertexBuffers(cb, 0, 1, &vBuffer, &vOffset);
 		vkCmdBindIndexBuffer(cb, vBuffer, vBufSize, VK_INDEX_TYPE_UINT32);
-		vkCmdPushConstants(cb, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VkDeviceAddress), &shaderDataBuffers[frameIndex].deviceAddress);
-		vkCmdDrawIndexed(cb, indexCount, 3, 0, 0, 0);
+		vkCmdPushConstants(cb, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(VkDeviceAddress), &shaderDataBuffers[frameIndex].deviceAddress);
+		for (auto& mesh : meshDrawInfos) {
+			uint32_t texIdx = static_cast<uint32_t>(mesh.materialIndex);
+			vkCmdPushConstants(cb, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(VkDeviceAddress), sizeof(uint32_t), &texIdx);
+			vkCmdDrawIndexed(cb, mesh.indexCount, 1, mesh.firstIndex, 0, 0);
+		}
 		vkCmdEndRendering(cb);
 		VkImageMemoryBarrier2 barrierPresent{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -836,9 +855,9 @@ int main(int argc, char* argv[])
 				break;
 			}
 			if (event.type == SDL_EVENT_MOUSE_MOTION) {
-				if (event.button.button == SDL_BUTTON_LEFT) {
-					objectRotations[shaderData.selected].x -= (float)event.motion.yrel * elapsedTime;
-					objectRotations[shaderData.selected].y += (float)event.motion.xrel * elapsedTime;
+				if (event.motion.state & SDL_BUTTON_LMASK) {
+					objectRotations[0].x -= (float)event.motion.yrel * elapsedTime;
+					objectRotations[0].y += (float)event.motion.xrel * elapsedTime;
 				}
 			}
 			if (event.type == SDL_EVENT_MOUSE_WHEEL) {

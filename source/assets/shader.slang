@@ -20,28 +20,30 @@ struct ShaderData {
     uint32_t selected;
 };
 
+struct PushConstants {
+    ShaderData* shaderData;
+    uint32_t textureIndex;
+};
+[[vk::push_constant]] PushConstants pc;
+
 struct VSOutput {
     float4 Pos : SV_POSITION;
     float3 Normal;
     float2 UV;
-    float3 Factor;
     float3 LightVec;
     float3 ViewVec;
-    uint32_t InstanceIndex;
 };
 
 [shader("vertex")]
-VSOutput main(VSInput input, uniform ShaderData *shaderData, uint instanceIndex : SV_VulkanInstanceID) {
+VSOutput main(VSInput input) {
     VSOutput output;
-    float4x4 modelMat = shaderData->model[instanceIndex];
-    output.Normal = mul((float3x3)mul(shaderData->view, modelMat), input.Normal);
+    float4x4 modelMat = pc.shaderData->model[0];
+    output.Normal = mul((float3x3)mul(pc.shaderData->view, modelMat), input.Normal);
     output.UV = input.UV;
-    output.Pos = mul(shaderData->projection, mul(shaderData->view, mul(modelMat, float4(input.Pos.xyz, 1.0))));
-    output.Factor = (shaderData->selected == instanceIndex ? 3.0f : 1.0f);
-    output.InstanceIndex = instanceIndex;
+    output.Pos = mul(pc.shaderData->projection, mul(pc.shaderData->view, mul(modelMat, float4(input.Pos.xyz, 1.0))));
     // Calculate view vectors required for lighting
-    float4 fragPos = mul(mul(shaderData->view, modelMat), float4(input.Pos.xyz, 1.0));
-    output.LightVec = shaderData->lightPos.xyz - fragPos.xyz;
+    float4 fragPos = mul(mul(pc.shaderData->view, modelMat), float4(input.Pos.xyz, 1.0));
+    output.LightVec = pc.shaderData->lightPos.xyz - fragPos.xyz;
     output.ViewVec = -fragPos.xyz;
     return output;
 }
@@ -55,7 +57,7 @@ float4 main(VSOutput input) {
     float3 R = reflect(-L, N);
     float3 diffuse = max(dot(N, L), 0.0025);
     float3 specular = pow(max(dot(R, V), 0.0), 16.0) * 0.75;
-    // Sample from texture
-    float3 color = textures[NonUniformResourceIndex(input.InstanceIndex)].Sample(input.UV).rgb * input.Factor;
+    // Sample from texture using per-mesh material index from push constant
+    float3 color = textures[NonUniformResourceIndex(pc.textureIndex)].Sample(input.UV).rgb;
     return float4(diffuse * color.rgb + specular, 1.0);
 }
