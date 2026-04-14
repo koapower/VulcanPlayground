@@ -54,6 +54,33 @@ endif()
 
 FetchContent_MakeAvailable(assimp)
 
+# ImGui
+FetchContent_Declare(
+  imgui
+  GIT_REPOSITORY https://github.com/ocornut/imgui.git
+  GIT_TAG v1.91.6
+  GIT_SHALLOW ON
+  EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(imgui_lib STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+)
+target_include_directories(imgui_lib PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+    $ENV{VULKAN_SDK}/include
+)
+# Must match the main project: no Vulkan prototypes, use volk
+target_compile_definitions(imgui_lib PUBLIC VK_NO_PROTOTYPES)
+target_link_libraries(imgui_lib PUBLIC ${SDL_LIBRARY})
+
 set(KTX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/ktx)
 set(KTX_SOURCES
     ${KTX_DIR}/lib/texture.c
@@ -92,7 +119,7 @@ if (WIN32)
 endif()
 set_target_properties(${NAME} PROPERTIES DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(${NAME} PRIVATE cxx_std_20)
-target_link_libraries(${NAME} PRIVATE ${SDL_LIBRARY} ktx ${Slang_LIBRARY} assimp::assimp)
+target_link_libraries(${NAME} PRIVATE ${SDL_LIBRARY} ktx ${Slang_LIBRARY} assimp::assimp imgui_lib)
 if (NOT WIN32)
     target_link_libraries(${NAME} PRIVATE glm::glm-header-only)
 endif()

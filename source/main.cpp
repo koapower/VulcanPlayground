@@ -30,6 +30,9 @@
 #include <assimp/postprocess.h>
 #include "TextureLoader.h"
 #include "Camera.h"
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_vulkan.h>
 
 constexpr uint32_t maxFramesInFlight{ 2 };
 uint32_t imageIndex{ 0 };
@@ -77,6 +80,7 @@ struct Texture {
 };
 std::vector<Texture> textures{};
 VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
+VkDescriptorPool imguiDescriptorPool{ VK_NULL_HANDLE };
 VkDescriptorSetLayout descriptorSetLayoutTex{ VK_NULL_HANDLE };
 VkDescriptorSet descriptorSetTex{ VK_NULL_HANDLE };
 Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
@@ -662,6 +666,10 @@ int main(int argc, char* argv[])
 	VkDescriptorPoolSize poolSize{ .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = static_cast<uint32_t>(textures.size()) };
 	VkDescriptorPoolCreateInfo descPoolCI{ .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &poolSize };
 	chk(vkCreateDescriptorPool(device, &descPoolCI, nullptr, &descriptorPool));
+	// ImGui descriptor pool (needs FREE_DESCRIPTOR_SET flag for imgui internal management)
+	VkDescriptorPoolSize imguiPoolSize{ .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1 };
+	VkDescriptorPoolCreateInfo imguiPoolCI{ .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT, .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &imguiPoolSize };
+	chk(vkCreateDescriptorPool(device, &imguiPoolCI, nullptr, &imguiDescriptorPool));
 	uint32_t variableDescCount{ static_cast<uint32_t>(textures.size()) };
 	VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI{ .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT, .descriptorSetCount = 1, .pDescriptorCounts = &variableDescCount };
 	VkDescriptorSetAllocateInfo texDescSetAlloc{ .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .pNext = &variableDescCountAI, .descriptorPool = descriptorPool, .descriptorSetCount = 1, .pSetLayouts = &descriptorSetLayoutTex };
@@ -790,6 +798,36 @@ int main(int argc, char* argv[])
 		memcpy(mapped, gizmoVerts, sizeof(gizmoVerts));
 		vmaUnmapMemory(allocator, gizmoVAllocation);
 	}
+	// ImGui setup
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGui::GetIO().IniFilename = nullptr; // don't write imgui.ini
+	// Provide Vulkan function loader to ImGui (needed because VK_NO_PROTOTYPES / volk)
+	ImGui_ImplVulkan_LoadFunctions([](const char* fn, void*) -> PFN_vkVoidFunction {
+		return vkGetInstanceProcAddr(instance, fn);
+	}, nullptr);
+	ImGui_ImplSDL3_InitForVulkan(window);
+	VkPipelineRenderingCreateInfo imguiRenderingCI{
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+		.colorAttachmentCount = 1,
+		.pColorAttachmentFormats = &imageFormat,
+		.depthAttachmentFormat = depthFormat,
+	};
+	ImGui_ImplVulkan_InitInfo imguiInitInfo{
+		.Instance = instance,
+		.PhysicalDevice = devices[deviceIndex],
+		.Device = device,
+		.QueueFamily = queueFamily,
+		.Queue = queue,
+		.DescriptorPool = imguiDescriptorPool,
+		.MinImageCount = surfaceCaps.minImageCount,
+		.ImageCount = imageCount,
+		.MSAASamples = VK_SAMPLE_COUNT_1_BIT,
+		.UseDynamicRendering = true,
+		.PipelineRenderingCreateInfo = imguiRenderingCI,
+	};
+	ImGui_ImplVulkan_Init(&imguiInitInfo);
+
 	// Render loop
 	uint64_t lastTime{ SDL_GetTicks() };
 	bool quit{ false };
@@ -899,6 +937,30 @@ int main(int argc, char* argv[])
 			vkCmdPushConstants(cb, gizmoPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &gizmoMVP);
 			vkCmdDraw(cb, 6, 1, 0, 0);
 		}
+		// Stats overlay
+		{
+			ImGui_ImplVulkan_NewFrame();
+			ImGui_ImplSDL3_NewFrame();
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos({10.0f, 10.0f});
+			ImGui::SetNextWindowBgAlpha(0.6f);
+			ImGui::Begin("Stats", nullptr,
+				ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+				ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+				ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
+			ImGui::Text("FPS:       %.1f", ImGui::GetIO().Framerate);
+			ImGui::Text("Meshes:    %u", (uint32_t)meshDrawInfos.size());
+			ImGui::Text("Textures:  %u", (uint32_t)textures.size());
+			ImGui::Text("Triangles: %u", indexCount / 3);
+			ImGui::End();
+			ImGui::Render();
+			// Reset viewport/scissor to full window before ImGui renders
+			VkViewport fullVP{ .width = (float)windowSize.x, .height = (float)windowSize.y, .minDepth = 0.f, .maxDepth = 1.f };
+			VkRect2D fullScissor{ .extent{.width = (uint32_t)windowSize.x, .height = (uint32_t)windowSize.y} };
+			vkCmdSetViewport(cb, 0, 1, &fullVP);
+			vkCmdSetScissor(cb, 0, 1, &fullScissor);
+			ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cb);
+		}
 		vkCmdEndRendering(cb);
 		VkImageMemoryBarrier2 barrierPresent{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -938,8 +1000,8 @@ int main(int argc, char* argv[])
 		};
 		chkSwapchain(vkQueuePresentKHR(queue, &presentInfo));
 		// Event polling
-		lastTime = SDL_GetTicks();
 		for (SDL_Event event; SDL_PollEvent(&event);) {
+			ImGui_ImplSDL3_ProcessEvent(&event);
 			if (event.type == SDL_EVENT_QUIT) {
 				quit = true;
 				break;
@@ -988,6 +1050,10 @@ int main(int argc, char* argv[])
 	}
 	// Tear down
 	chk(vkDeviceWaitIdle(device));
+	ImGui_ImplVulkan_Shutdown();
+	ImGui_ImplSDL3_Shutdown();
+	ImGui::DestroyContext();
+	vkDestroyDescriptorPool(device, imguiDescriptorPool, nullptr);
 	for (auto i = 0; i < maxFramesInFlight; i++) {
 		vkDestroyFence(device, fences[i], nullptr);
 		vkDestroySemaphore(device, presentSemaphores[i], nullptr);
