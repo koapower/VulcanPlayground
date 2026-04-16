@@ -7,6 +7,12 @@ include(FetchContent)
 set(NAME VulkanPlayground)
 project(${NAME})
 
+# Must be set before any FetchContent_MakeAvailable / add_library calls
+# so all static libs (assimp, ktx, imgui_lib) use the same runtime as the exe
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 if (NOT IS_DIRECTORY $ENV{VULKAN_SDK})
     message(WARNING "Vulkan SDK not detected, if installed please set VULKAN_SDK env var or manually provide libraries")
 else()

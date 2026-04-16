@@ -829,11 +829,16 @@ int main(int argc, char* argv[])
 	ImGui_ImplVulkan_Init(&imguiInitInfo);
 
 	// Render loop
-	uint64_t lastTime{ SDL_GetTicks() };
+	const uint64_t perfFreq{ SDL_GetPerformanceFrequency() };
+	uint64_t lastPerfTime{ SDL_GetPerformanceCounter() };
+	float smoothFps{ 0.0f };
 	bool quit{ false };
 	while (!quit) {
-		float elapsedTime{ (SDL_GetTicks() - lastTime) / 1000.0f };
-		lastTime = SDL_GetTicks();
+		uint64_t now{ SDL_GetPerformanceCounter() };
+		float elapsedTime{ static_cast<float>(now - lastPerfTime) / static_cast<float>(perfFreq) };
+		lastPerfTime = now;
+		float fps{ elapsedTime > 0.0f ? 1.0f / elapsedTime : 0.0f };
+		smoothFps = smoothFps * 0.95f + fps * 0.05f;
 		// Sync
 		chk(vkWaitForFences(device, 1, &fences[frameIndex], true, UINT64_MAX));
 		chk(vkResetFences(device, 1, &fences[frameIndex]));
@@ -948,7 +953,7 @@ int main(int argc, char* argv[])
 				ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
 				ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
 				ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
-			ImGui::Text("FPS:       %.1f", ImGui::GetIO().Framerate);
+			ImGui::Text("FPS:       %.1f (%.2f ms)", smoothFps, elapsedTime * 1000.0f);
 			ImGui::Text("Meshes:    %u", (uint32_t)meshDrawInfos.size());
 			ImGui::Text("Textures:  %u", (uint32_t)textures.size());
 			ImGui::Text("Triangles: %u", indexCount / 3);
