@@ -1012,6 +1012,15 @@ int main(int argc, char* argv[])
 				break;
 			}
 			camera.processEvent(event);
+			// Left drag: rotate selected model
+			if (event.type == SDL_EVENT_MOUSE_MOTION &&
+				(event.motion.state & SDL_BUTTON_LMASK) &&
+				!ImGui::GetIO().WantCaptureMouse)
+			{
+				constexpr float kModelRotSpeed = 0.005f;
+				objectRotations[shaderData.selected].y += (float)event.motion.xrel * kModelRotSpeed;
+				objectRotations[shaderData.selected].x += (float)event.motion.yrel * kModelRotSpeed;
+			}
 			if (event.type == SDL_EVENT_KEY_DOWN) {
 				if (event.key.key == SDLK_1) shaderData.selected = 0;
 				if (event.key.key == SDLK_2) shaderData.selected = 1;
