@@ -15,7 +15,7 @@ Sampler2D textures[];
 struct ShaderData {
     float4x4 projection;
     float4x4 view;
-    float4x4 model[3];
+    float4x4 model[100];
     float4 lightPos;
     uint32_t selected;
 };
@@ -35,9 +35,9 @@ struct VSOutput {
 };
 
 [shader("vertex")]
-VSOutput main(VSInput input) {
+VSOutput main(VSInput input, uint instanceId : SV_InstanceID) {
     VSOutput output;
-    float4x4 modelMat = pc.shaderData->model[0];
+    float4x4 modelMat = pc.shaderData->model[instanceId];
     output.Normal = mul((float3x3)mul(pc.shaderData->view, modelMat), input.Normal);
     output.UV = input.UV;
     output.Pos = mul(pc.shaderData->projection, mul(pc.shaderData->view, mul(modelMat, float4(input.Pos.xyz, 1.0))));

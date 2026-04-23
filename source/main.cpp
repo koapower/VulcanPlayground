@@ -61,7 +61,7 @@ VkBuffer vBuffer{ VK_NULL_HANDLE };
 struct ShaderData {
 	glm::mat4 projection;
 	glm::mat4 view;
-	glm::mat4 model[3];
+	glm::mat4 model[100];
 	glm::vec4 lightPos{ 0.0f, -10.0f, 10.0f, 0.0f };
 	uint32_t selected{ 1 };
 } shaderData{};
@@ -85,7 +85,7 @@ VkDescriptorSetLayout descriptorSetLayoutTex{ VK_NULL_HANDLE };
 VkDescriptorSet descriptorSetTex{ VK_NULL_HANDLE };
 Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
 Camera camera{};
-glm::vec3 objectRotations[3]{};
+glm::vec3 objectRotations[100]{};
 glm::ivec2 windowSize{};
 struct Vertex {
 	glm::vec3 pos;
@@ -100,6 +100,8 @@ VkPipeline gizmoPipeline{ VK_NULL_HANDLE };
 VkPipelineLayout gizmoPipelineLayout{ VK_NULL_HANDLE };
 VkBuffer gizmoVBuffer{ VK_NULL_HANDLE };
 VmaAllocation gizmoVAllocation{ VK_NULL_HANDLE };
+constexpr int kGridSize = 10;
+constexpr float kSpacing = 30.0f;
 
 static inline void chk(VkResult result) {
 	if (result != VK_SUCCESS) {
@@ -193,9 +195,11 @@ int main(int argc, char* argv[])
 	std::vector<VkPhysicalDevice> devices(deviceCount);
 	chk(vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()));
 	uint32_t deviceIndex{ 0 };
-	if (argc > 1) {
-		deviceIndex = std::stoi(argv[1]);
-		assert(deviceIndex < deviceCount);
+	if (deviceCount > 1) {
+		deviceIndex = 1; //priority use the second one
+	}
+	else {
+		deviceIndex = 0;
 	}
 	VkPhysicalDeviceProperties2 deviceProperties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
 	vkGetPhysicalDeviceProperties2(devices[deviceIndex], &deviceProperties);
@@ -828,6 +832,8 @@ int main(int argc, char* argv[])
 	};
 	ImGui_ImplVulkan_Init(&imguiInitInfo);
 
+	// Initialize all model rotations: x = -90 degrees
+	for (auto& rot : objectRotations) rot.x = glm::half_pi<float>();
 	// Render loop
 	const uint64_t perfFreq{ SDL_GetPerformanceFrequency() };
 	uint64_t lastPerfTime{ SDL_GetPerformanceCounter() };
@@ -846,8 +852,15 @@ int main(int argc, char* argv[])
 		// Update shader data
 		shaderData.projection = glm::perspective(glm::radians(45.0f), (float)windowSize.x / (float)windowSize.y, 0.1f, 10000.0f);
 		shaderData.view = camera.getViewMatrix();
-		for (auto i = 0; i < 3; i++) {
-			auto instancePos = glm::vec3((float)(i - 1) * 3.0f, 0.0f, 0.0f);
+		
+		for (auto i = 0; i < kGridSize * kGridSize; i++) {
+			int col = i % kGridSize;
+			int row = i / kGridSize;
+			glm::vec3 instancePos{
+				(col - (kGridSize - 1) * 0.5f) * kSpacing,
+				0.0f,
+				(row - (kGridSize - 1) * 0.5f) * kSpacing
+			};
 			shaderData.model[i] = glm::translate(glm::mat4(1.0f), instancePos) * glm::mat4_cast(glm::quat(objectRotations[i]));
 		}
 		memcpy(shaderDataBuffers[frameIndex].mapped, &shaderData, sizeof(ShaderData));
@@ -920,7 +933,7 @@ int main(int argc, char* argv[])
 		for (auto& mesh : meshDrawInfos) {
 			uint32_t texIdx = static_cast<uint32_t>(mesh.materialIndex);
 			vkCmdPushConstants(cb, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(VkDeviceAddress), sizeof(uint32_t), &texIdx);
-			vkCmdDrawIndexed(cb, mesh.indexCount, 1, mesh.firstIndex, 0, 0);
+			vkCmdDrawIndexed(cb, mesh.indexCount, kGridSize * kGridSize, mesh.firstIndex, 0, 0);
 		}
 		// XYZ gizmo — top-right corner, rotation-only view
 		{
